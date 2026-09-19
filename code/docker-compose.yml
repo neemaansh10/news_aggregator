@@ -1,0 +1,34 @@
+# Local stack with the real infrastructure backends.
+# The application runs without any of these - see README.md Quick start.
+services:
+  api:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      NEWSAGG_DATABASE_URL: postgresql+asyncpg://newsagg:newsagg@postgres:5432/newsagg
+      NEWSAGG_REDIS_URL: redis://redis:6379/0
+      NEWSAGG_API_HOST: 0.0.0.0
+      NEWSAGG_LOG_JSON: "true"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_started }
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: newsagg
+      POSTGRES_PASSWORD: newsagg
+      POSTGRES_DB: newsagg
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U newsagg"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+volumes:
+  pgdata:

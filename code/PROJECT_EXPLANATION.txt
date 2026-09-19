@@ -1,0 +1,185 @@
+===============================================================================
+                       NEWS AGGREGATOR - SYSTEM EXPLANATION
+===============================================================================
+
+[BHAI SUMMARY / QUICK OVERVIEW]
+Aapne code me koi change na karne ko bola tha. Main bilkul koi code change NAHI
+kar raha hu. Yeh document setup kiya gaya hai taaki aap easily samajh sake ki 
+yeh system KYA KAR RAHA HAI aur KYU KAR RAHA HAI.
+
+===============================================================================
+1. KYU KAR RAHE HAI? (The Problem & Purpose)
+===============================================================================
+
+- PROBLEM:
+  Aaj kal jab koi badi real-world news (event) hoti hai, toh hundreds of news 
+  outlets (Reuters, AP, BBC, Times, etc.) ek hi khabar ko cover karte hain.
+  Par user ke feed me:
+    1. Ek hi story ke 10 alag-alag articles dikhte hain (Syndicated copies & rewrites).
+    2. Repeated URLs ya identical wire content ki vajah se feed cluttered ho jata hai.
+    3. Clickbait ya 10 syndicated copies wali news top pe rank ho jaati hai bina 
+       independent verification ke.
+
+- AIM / GOAL:
+  Yeh project ek Smart News Aggregator system hai.
+  Yeh system:
+    1. Articles ingest karta hai multiple news publishers se.
+    2. Duplicates collapse karta hai (Exact duplicate, Wire copy, Rewritten headlines).
+    3. Ek hi event ki sari alag-alag news ko GROUP karke ek single "STORY" banata hai.
+    4. Stories ko RANK karta hai based on:
+       - Independent credible source verification (Kitni genuine outets report kar rahi hain)
+       - Recency Decay (Kitni taaza khabar hai)
+       - Source Authority (Publisher ki reliability)
+    5. User ko aisi feed serve karta hai jisme STORY-LEVEL de-duplication ho.
+
+===============================================================================
+2. KYA KAR RAHE HAI? (Architecture & Technical Workflow)
+===============================================================================
+
+Yeh system 5 main processing stages me kaam karta hai:
+
+-------------------------------------------------------------------------------
+STAGE 1: Ingestion & Fetching (`newsagg/ingestion/`)
+-------------------------------------------------------------------------------
+- Thousands of RSS/Atom news feeds ko continuously poll karta hai.
+- Efficient Network Handling:
+  * Conditional GET (HTTP 304 with ETag / Last-Modified): Agla fetch tabhi karta
+    hai jab feed me naya article aaya ho (bandwidth saved).
+  * Circuit Breaker & Exponential Backoff: Agar koi source down ho ya slow ho,
+    toh server block nahi hota.
+
+-------------------------------------------------------------------------------
+STAGE 2: Text Normalization & Feature Extraction (`newsagg/text/normalise.py`)
+-------------------------------------------------------------------------------
+- Raw HTML & Text Cleaning: Boiletplate text, ads, formatting aur tracking parameters
+  (e.g., `?utm_source=...`) ko URL se saaf karta hai.
+- Entity & Keyword Extraction: Headline aur body se Named Entities (People, Places,
+  Organizations) aur key terms extract karta hai.
+
+-------------------------------------------------------------------------------
+STAGE 3: 4-Stage Deduplication Cascade (`newsagg/text/fingerprint.py` & `clustering/`)
+-------------------------------------------------------------------------------
+System duplicates ko 4 levels me check karta hai (Cheap check pehle, Expensive baad me):
+
+1. Boundary Check (URL Match): Same URL dubara aaye toh instantly reject.
+2. Payload Hash Check (SHA-256): Same exact text body kisi aur URL pe aaye toh reject.
+3. Near-Duplicate / Wire Copy Check (SimHash + LSH):
+   - Reuters / AP wire stories ko multiple newspapers headline badal kar post karte hain.
+   - System 64-bit SimHash footprint aur LSH (Locality-Sensitive Hashing) banding
+     se Hamming distance calculate karke instant identify karta hai ki yeh wire copy hai.
+4. Semantic Story Clustering (TF-IDF + Composite Similarity):
+   - Streaming TF-IDF Vectorizer body aur headline vectors compute karta hai.
+   - Composite Similarity = (Headline Cosine * 0.3) + (Body Cosine * 0.4) + 
+                          (Entity Overlap Jaccard * 0.2) + (Time Proximity * 0.1).
+   - Agar similarity threshold (>= 0.52) cross hoti hai, toh naya article existing 
+     STORY ka hissa ban jata hai!
+
+-------------------------------------------------------------------------------
+STAGE 4: Story Clustering & Merge Repair (`newsagg/clustering/` & `pipeline/`)
+-------------------------------------------------------------------------------
+- Incremental Online Clustering: Jaise hi article aata hai, real-time me check hota
+  hai ki kya iski story pehle se active hai.
+- Async Background Merge Pass: Kuch articles timing delay ki vajah se 2 alag 
+  stories ban jaate hain. Background job in split stories ko detect karke merge 
+  karti hai.
+
+-------------------------------------------------------------------------------
+STAGE 5: Credibility-Based Ranking (`newsagg/ranking/`)
+-------------------------------------------------------------------------------
+Ranking Formula:
+  Score = Authority * Syndication Multiplier * Recency Decay
+
+- Independent Reporting vs Syndicated Copy:
+  Agar 10 outlets ek hi Reuters wire copy chipkaayein, toh unhe 10 points NAHI milenge.
+  System **Independent Reporting** (jo alag se cover hui ho) ko zyaada weightage deta hai
+  aur **Syndicated Copies** ko sub-linear / discounted weightage deta hai.
+- Recency Decay: Purani news ka score time ke saath naturally kam hota chala jata hai.
+
+===============================================================================
+3. FOLDER & MODULE STRUCTURE (Kaunsa Code Kya Kar Raha Hai)
+===============================================================================
+
+news-aggregator/
+├── main.py                   -> Application CLI entrypoint (demo, serve, poll-once, init-db).
+├── SYSTEM_DESIGN.md          -> Detailed architecture, algorithms, and trade-off documentation.
+├── README.md                 -> Quickstart guide and API endpoints reference.
+├── tests/                    -> 122 pure unit/integration tests (zero external network dependency).
+└── newsagg/
+    ├── config.py             -> Typed settings and environment variable configurations.
+    ├── observability.py      -> Structured logging (JSON format) and Prometheus metrics.
+    ├── runtime.py            -> Dependency injection, process lifecycle, and worker orchestration.
+    ├── cli.py                -> Command-line interface definitions using argparse.
+    │
+    ├── text/                 -> Pure algorithmic core (No I/O):
+    │   ├── normalise.py      -> URL canonicalisation, HTML cleaning, entity extraction.
+    │   ├── fingerprint.py    -> SimHash computation, LSH banding, MinHash deduplication.
+    │   └── vectorise.py      -> Streaming TF-IDF vectorization, composite cosine math.
+    │
+    ├── db/                   -> Data persistence layer:
+    │   ├── models.py         -> SQLAlchemy database models (Article, Story, Source, User).
+    │   ├── session.py        -> DB connection engine, session management (SQLite / PostgreSQL).
+    │   └── repositories.py   -> Data access layer queries (Idempotent upserts, reads).
+    │
+    ├── infra/                -> Swappable infrastructure abstraction:
+    │   ├── cache.py          -> Redis cache with in-memory fallback.
+    │   ├── event_bus.py      -> Kafka pub/sub with in-memory fallback.
+    │   └── resilience.py     -> Token bucket rate limiting, jittered retries.
+    │
+    ├── ingestion/            -> News collection:
+    │   ├── schemas.py        -> Data transfer objects (RawArticle, NormalisedArticle).
+    │   ├── fetcher.py        -> Async feed fetcher with Conditional GET & Circuit Breaker.
+    │   └── normaliser.py     -> Transforms raw feeds into structured normalized articles.
+    │
+    ├── clustering/           -> Real-time grouping engine:
+    │   └── engine.py         -> Online story clustering engine and duplicate cascade manager.
+    │
+    ├── ranking/              -> Story scoring:
+    │   ├── scoring.py        -> Authority math, syndication discount, recency decay algorithms.
+    │   └── ranker.py         -> Periodic background feed ranker and user affinity weighting.
+    │
+    ├── pipeline/             -> Background worker system:
+    │   ├── workers.py        -> Worker loops consuming event streams.
+    │   └── jobs.py           -> Scheduled jobs (Story merge pass, retention cleanup, TF-IDF stats).
+    │
+    └── api/                  -> Serving layer (FastAPI HTTP REST Endpoints):
+        ├── app.py            -> FastAPI application setup & middleware assembly.
+        ├── routes/           -> Feed (/v1/feed), Stories (/v1/stories), Ingest, Sources endpoints.
+        └── cursors.py        -> Opaque cursor tokens for pagination without duplicate items.
+
+===============================================================================
+4. KEY DESIGN HIGHLIGHTS & BEST PRACTICES
+===============================================================================
+
+1. Invariants Live in Database Schema:
+   Rules like "Duplicate URL not allowed" live in database UNIQUE indexes, not 
+   just application code, ensuring zero data corruption.
+
+2. Zero External Dependency Default for Dev/Testing:
+   Project runs locally out-of-the-box using SQLite, In-Memory Event Bus, and 
+   In-Memory Cache. Environment variables can switch it to PostgreSQL, Kafka, and Redis.
+
+3. Complete Idempotency:
+   Every API endpoint (e.g. `POST /v1/ingest` with `Idempotency-Key`) and worker stage 
+   is replayable without side-effects.
+
+4. Comprehensive Testing (122 Tests):
+   Algorithms like SimHash threshold, LSH pigeonhole guarantee, and story clustering 
+   are exhaustively tested without requiring live network access.
+
+===============================================================================
+5. HOW TO RUN & VERIFY
+===============================================================================
+
+1. Offline Demo Run:
+   $ python main.py demo
+   (Seeds 22 articles across 5 planted real-world events and prints the clustered feed)
+
+2. Serve Local REST API:
+   $ python main.py serve
+   (Starts FastAPI server at http://127.0.0.1:8000 with interactive docs at /docs)
+
+3. Run Test Suite:
+   $ python -m pytest tests/ -q
+   (Executes 122 automated unit and integration tests)
+
+===============================================================================
