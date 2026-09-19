@@ -1,6 +1,6 @@
 # Scalable News Aggregator
 
-![System Architecture Diagram](image.png)
+![System Architecture Diagram](design.png)
 
 Welcome to the **Scalable News Aggregator** repository!
 
@@ -13,7 +13,7 @@ This system ingests news articles from thousands of publishers, collapses duplic
 This repository is organized into three primary sections:
 
 1. 📄 **[DESCRIPTION.md](DESCRIPTION.md)** — Comprehensive technical description, pipeline stages, algorithms, and system design.
-2. 🖼️ **`image.png`** — High-resolution System Architecture Banner & Processing Pipeline Diagram.
+2. 🖼️ **`design.png`** — High-resolution System Architecture Banner & Processing Pipeline Diagram.
 3. 📁 **[`code/`](code/)** — Complete executable Python application, algorithms, API server, tests, and Docker setup.
 
 ---

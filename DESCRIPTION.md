@@ -1,6 +1,6 @@
 # Scalable News Aggregator — System Overview & Architecture
 
-![System Architecture Architecture Banner](image.png)
+![System Architecture Architecture Banner](design.png)
 
 ## 📌 Executive Summary
 
@@ -65,7 +65,7 @@ When viewing the repository root, the project is structured as follows:
 news_aggregator/
 ├── DESCRIPTION.md            # ← Detailed System Description & Architecture Document
 ├── README.md                 # ← Repository Landing Page
-├── image.png                 # ← High-Resolution System Architecture Diagram
+├── design.png                # ← High-Resolution System Architecture Diagram
 │
 └── code/                     # ← Complete Application Source Code
     ├── main.py               # Application CLI entrypoint (demo, serve, poll-once)
